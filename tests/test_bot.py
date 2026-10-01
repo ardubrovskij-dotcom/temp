@@ -141,7 +141,7 @@ def test_comedy_cli_parses_structured_output(monkeypatch, tmp_path):
     assert result == '1. <a href="https://www.rbc.ru/b">Второй</a>\n😏 <i>Ха</i>'
 
 
-def test_pick_meme_skips_nsfw_and_video():
+def test_pick_meme_skips_video_allows_nsfw():
     memes = [
         {"url": "https://i.redd.it/a.jpg", "ups": 900, "nsfw": True},
         {"url": "https://v.redd.it/b.mp4", "ups": 800},
@@ -149,5 +149,6 @@ def test_pick_meme_skips_nsfw_and_video():
         {"url": "https://i.redd.it/d.png", "ups": 500, "spoiler": False},
         {"url": "https://i.redd.it/e.jpg", "ups": 100},
     ]
-    assert meme.pick_meme(memes)["url"] == "https://i.redd.it/d.png"
+    assert meme.pick_meme(memes)["url"] == "https://i.redd.it/a.jpg"
+    assert meme.pick_meme(memes[1:])["url"] == "https://i.redd.it/d.png"
     assert meme.pick_meme([]) is None

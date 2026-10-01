@@ -60,7 +60,13 @@ async def send_meme(bot: Bot, chat_id: int, item: dict | None) -> None:
     if not item:
         return
     try:
-        await bot.send_photo(chat_id, item["url"], caption="🖼 Мем дня")
+        nsfw = bool(item.get("nsfw") or item.get("spoiler"))
+        await bot.send_photo(
+            chat_id,
+            item["url"],
+            caption="🖼 Мем дня" + (" (18+)" if nsfw else ""),
+            has_spoiler=nsfw,
+        )
     except Exception:
         log.exception("Не удалось отправить мем %s", item.get("url"))
 

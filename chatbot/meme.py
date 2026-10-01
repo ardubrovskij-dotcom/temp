@@ -13,14 +13,8 @@ IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp")
 
 
 def pick_meme(memes: list[dict]) -> dict | None:
-    """Выбирает картинку с наибольшим числом лайков, без 18+ и спойлеров."""
-    ok = [
-        m
-        for m in memes
-        if not m.get("nsfw")
-        and not m.get("spoiler")
-        and str(m.get("url", "")).lower().endswith(IMAGE_EXTS)
-    ]
+    """Выбирает картинку с наибольшим числом лайков (18+ тоже подходят)."""
+    ok = [m for m in memes if str(m.get("url", "")).lower().endswith(IMAGE_EXTS)]
     return max(ok, key=lambda m: m.get("ups", 0), default=None)
 
 
