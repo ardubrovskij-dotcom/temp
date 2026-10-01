@@ -3,6 +3,7 @@
 Режимы:
   send         собрать сводку и сразу отправить в чат;
   send --wait  то же, но если сейчас раньше 9:00 МСК — дождаться 9:00;
+  send --no-mentions  тестовая отправка без тэгов участников;
   find-chat    вывести ID чатов, где боту недавно писали (для настройки CHAT_ID).
 
 Постоянно работающего процесса нет, поэтому участников бот узнаёт из
@@ -65,12 +66,13 @@ async def wait_until_send_time() -> None:
         await asyncio.sleep(delay)
 
 
-async def send(bot: Bot, chat_id: int, wait: bool) -> None:
+async def send(bot: Bot, chat_id: int, wait: bool, mentions: bool = True) -> None:
     store = MemberStore(ROOT / "members.txt", ROOT / "data" / "members.json")
     for msg in await read_updates(bot, confirm=True):
         if msg.chat.id == chat_id:
             store.record(msg)
-    texts = await message.build(datetime.now(MSK).date(), store.mentions())
+    tags = store.mentions() if mentions else []
+    texts = await message.build(datetime.now(MSK).date(), tags)
     if wait:
         await wait_until_send_time()
     await send_texts(bot, chat_id, texts)
@@ -82,7 +84,7 @@ async def run(args: argparse.Namespace) -> None:
         if args.mode == "find-chat":
             await find_chat(bot)
         else:
-            await send(bot, int(os.environ["CHAT_ID"]), args.wait)
+            await send(bot, int(os.environ["CHAT_ID"]), args.wait, not args.no_mentions)
 
 
 def main() -> None:
@@ -94,6 +96,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("mode", choices=["send", "find-chat"])
     parser.add_argument("--wait", action="store_true")
+    parser.add_argument("--no-mentions", action="store_true")
     asyncio.run(run(parser.parse_args()))
 
 

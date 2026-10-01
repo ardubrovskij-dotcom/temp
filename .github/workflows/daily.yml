@@ -8,9 +8,9 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "send — отправить сводку сейчас; find-chat — узнать ID чата"
+        description: "send — сводка сейчас; test — сводка без тэгов; find-chat — узнать ID чата"
         type: choice
-        options: [send, find-chat]
+        options: [send, test, find-chat]
         default: send
 
 permissions:
@@ -38,8 +38,9 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          CHAT_ID: ${{ vars.CHAT_ID }}
-          MODE: ${{ github.event_name == 'schedule' && 'send --wait' || inputs.mode }}
+          # «Богатая башенка». Переменная CHAT_ID в настройках репозитория имеет приоритет.
+          CHAT_ID: ${{ vars.CHAT_ID || '-1002964274108' }}
+          MODE: ${{ github.event_name == 'schedule' && 'send --wait' || inputs.mode == 'test' && 'send --no-mentions' || inputs.mode }}
         run: python -m chatbot.oneshot $MODE
 
       - name: Сохранить список участников

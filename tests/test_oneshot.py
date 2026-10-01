@@ -43,3 +43,16 @@ def test_send_records_members_from_target_chat_only(tmp_path, monkeypatch):
     asyncio.run(oneshot.send(bot, -1, wait=False))
     assert bot.sent == [(-1, "@static @alice")]
     assert (tmp_path / "data" / "members.json").exists()
+
+
+def test_send_without_mentions(tmp_path, monkeypatch):
+    (tmp_path / "members.txt").write_text("@static\n", encoding="utf-8")
+    monkeypatch.setattr(oneshot, "ROOT", tmp_path)
+
+    async def fake_build(day, mentions):
+        return [f"tags={len(mentions)}"]
+
+    monkeypatch.setattr(oneshot.message, "build", fake_build)
+    bot = FakeBot([_msg(-1, 1, "alice")])
+    asyncio.run(oneshot.send(bot, -1, wait=False, mentions=False))
+    assert bot.sent == [(-1, "tags=0")]
