@@ -12,7 +12,7 @@ from telegram.constants import ParseMode
 from telegram.error import NetworkError, RetryAfter
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
-from . import message
+from . import meme, message
 from .members import MemberStore
 
 MSK = ZoneInfo("Europe/Moscow")
@@ -56,6 +56,15 @@ async def send_texts(bot: Bot, chat_id: int, texts: list[str]) -> None:
                 await asyncio.sleep(5)
 
 
+async def send_meme(bot: Bot, chat_id: int, item: dict | None) -> None:
+    if not item:
+        return
+    try:
+        await bot.send_photo(chat_id, item["url"], caption="🖼 Мем дня")
+    except Exception:
+        log.exception("Не удалось отправить мем %s", item.get("url"))
+
+
 async def _build_today(context: ContextTypes.DEFAULT_TYPE) -> list[str]:
     store: MemberStore = context.bot_data["store"]
     return await message.build(datetime.now(MSK).date(), store.mentions())
@@ -80,6 +89,7 @@ async def send_job(context: ContextTypes.DEFAULT_TYPE) -> None:
         log.warning("CHAT_ID не задан — некуда отправлять")
         return
     await send_texts(context.bot, chat_id, texts)
+    await send_meme(context.bot, chat_id, await meme.get_meme())
     log.info("Утреннее сообщение отправлено")
 
 
@@ -90,6 +100,7 @@ async def cmd_chatid(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 async def cmd_today(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.effective_message.reply_text("Собираю сводку…")
     await send_texts(context.bot, update.effective_chat.id, await _build_today(context))
+    await send_meme(context.bot, update.effective_chat.id, await meme.get_meme())
 
 
 async def cmd_members(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

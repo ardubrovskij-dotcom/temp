@@ -3,7 +3,7 @@ import json
 from datetime import date, timedelta
 from types import SimpleNamespace
 
-from chatbot import days, message, news, weather
+from chatbot import days, meme, message, news, weather
 from chatbot.members import MemberStore
 
 RSS = """<?xml version="1.0" encoding="utf-8"?>
@@ -139,3 +139,15 @@ def test_comedy_cli_parses_structured_output(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "test")
     result = asyncio.run(news._comedy(items))
     assert result == '1. <a href="https://www.rbc.ru/b">Второй</a>\n😏 <i>Ха</i>'
+
+
+def test_pick_meme_skips_nsfw_and_video():
+    memes = [
+        {"url": "https://i.redd.it/a.jpg", "ups": 900, "nsfw": True},
+        {"url": "https://v.redd.it/b.mp4", "ups": 800},
+        {"url": "https://i.redd.it/c.gif", "ups": 700},
+        {"url": "https://i.redd.it/d.png", "ups": 500, "spoiler": False},
+        {"url": "https://i.redd.it/e.jpg", "ups": 100},
+    ]
+    assert meme.pick_meme(memes)["url"] == "https://i.redd.it/d.png"
+    assert meme.pick_meme([]) is None

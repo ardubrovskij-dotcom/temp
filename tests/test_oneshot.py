@@ -1,7 +1,17 @@
 import asyncio
 from types import SimpleNamespace
 
+import pytest
+
 from chatbot import oneshot
+
+
+@pytest.fixture(autouse=True)
+def no_meme(monkeypatch):
+    async def fake_meme():
+        return None
+
+    monkeypatch.setattr(oneshot.meme, "get_meme", fake_meme)
 
 
 def _msg(chat_id, user_id, username, is_bot=False):
@@ -22,6 +32,9 @@ class FakeBot:
 
     async def send_message(self, chat_id, text, **kwargs):
         self.sent.append((chat_id, text))
+
+    async def send_photo(self, chat_id, photo, **kwargs):
+        self.sent.append((chat_id, photo))
 
 
 def test_read_updates_confirms_last_offset():
@@ -56,3 +69,19 @@ def test_send_without_mentions(tmp_path, monkeypatch):
     bot = FakeBot([_msg(-1, 1, "alice")])
     asyncio.run(oneshot.send(bot, -1, wait=False, mentions=False))
     assert bot.sent == [(-1, "tags=0")]
+
+
+def test_send_attaches_meme(tmp_path, monkeypatch):
+    monkeypatch.setattr(oneshot, "ROOT", tmp_path)
+
+    async def fake_build(day, mentions):
+        return ["сводка"]
+
+    async def fake_meme():
+        return {"url": "https://i.redd.it/x.jpg", "title": "t"}
+
+    monkeypatch.setattr(oneshot.message, "build", fake_build)
+    monkeypatch.setattr(oneshot.meme, "get_meme", fake_meme)
+    bot = FakeBot([])
+    asyncio.run(oneshot.send(bot, -1, wait=False))
+    assert bot.sent == [(-1, "сводка"), (-1, "https://i.redd.it/x.jpg")]

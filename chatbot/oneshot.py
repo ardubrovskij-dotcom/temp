@@ -18,8 +18,8 @@ from datetime import datetime, timedelta
 
 from telegram import Bot
 
-from . import message
-from .main import MSK, ROOT, SEND_AT, load_env, send_texts
+from . import meme, message
+from .main import MSK, ROOT, SEND_AT, load_env, send_meme, send_texts
 from .members import MemberStore
 
 log = logging.getLogger("chatbot.oneshot")
@@ -72,10 +72,13 @@ async def send(bot: Bot, chat_id: int, wait: bool, mentions: bool = True) -> Non
         if msg.chat.id == chat_id:
             store.record(msg)
     tags = store.mentions() if mentions else []
-    texts = await message.build(datetime.now(MSK).date(), tags)
+    texts, meme_item = await asyncio.gather(
+        message.build(datetime.now(MSK).date(), tags), meme.get_meme()
+    )
     if wait:
         await wait_until_send_time()
     await send_texts(bot, chat_id, texts)
+    await send_meme(bot, chat_id, meme_item)
     log.info("Сводка отправлена")
 
 
