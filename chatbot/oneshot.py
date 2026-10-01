@@ -42,6 +42,11 @@ async def read_updates(bot: Bot, confirm: bool) -> list:
 
 
 async def find_chat(bot: Bot) -> None:
+    me = await bot.get_me()
+    webhook = await bot.get_webhook_info()
+    print(f"Токен принадлежит боту @{me.username}")
+    print(f"Видит все сообщения в группах: {'да' if me.can_read_all_group_messages else 'нет'}")
+    print(f"Вебхук: {'установлен' if webhook.url else 'нет'}, ждут обработки: {webhook.pending_update_count}")
     chats = {}
     for msg in await read_updates(bot, confirm=False):
         chats[msg.chat.id] = msg.chat.title or msg.chat.full_name or msg.chat.type
