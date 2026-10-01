@@ -1,0 +1,53 @@
+name: Утренняя сводка
+
+on:
+  schedule:
+    # 05:10 UTC = 08:10 МСК. GitHub запускает расписание с задержкой,
+    # поэтому стартуем заранее, а скрипт сам ждёт ровно 9:00 МСК.
+    - cron: "10 5 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "send — отправить сводку сейчас; find-chat — узнать ID чата"
+        type: choice
+        options: [send, find-chat]
+        default: send
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-digest
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Запуск бота
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CHAT_ID: ${{ vars.CHAT_ID }}
+          MODE: ${{ github.event_name == 'schedule' && 'send --wait' || inputs.mode }}
+        run: python -m chatbot.oneshot $MODE
+
+      - name: Сохранить список участников
+        if: always()
+        run: |
+          git add data/members.json 2>/dev/null || exit 0
+          git diff --cached --quiet && exit 0
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Обновить список участников"
+          git push

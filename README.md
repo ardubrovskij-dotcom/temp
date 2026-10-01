@@ -29,14 +29,47 @@ Telegram не даёт ботам получить список всех уча�
 Чтобы бот видел все сообщения, в @BotFather отключите privacy mode:
 `/mybots → бот → Bot Settings → Group Privacy → Turn off`. После этого удалите бота из чата и добавьте снова.
 
-## Установка
+## Запуск через GitHub Actions (основной способ, бесплатно)
 
-### 1. Создать бота
-1. Напишите [@BotFather](https://t.me/BotFather) → `/newbot` → придумайте имя и юзернейм → скопируйте токен.
-2. Отключите Group Privacy (см. выше).
-3. Ключ для новостей: [platform.claude.com](https://platform.claude.com) → API Keys. Без ключа бот присылает обычные заголовки РБК без шуток.
+Компьютер не нужен: каждое утро GitHub сам запускает бота по расписанию
+(`.github/workflows/daily.yml`). Запуск стартует в 8:10 МСК, бот собирает
+сводку и ждёт ровно 9:00. Если GitHub задержит запуск больше чем на 50 минут
+(редко, но бывает), сообщение придёт позже.
 
-### 2. Поставить на VPS (Ubuntu/Debian, Python ≥ 3.11)
+### 1. Бот в Telegram
+1. [@BotFather](https://t.me/BotFather) → `/newbot` → получите токен. **Никому его не пересылайте.**
+2. Отключите Group Privacy (см. выше) и добавьте бота в чат.
+
+### 2. Секреты в GitHub
+Репозиторий → **Settings → Secrets and variables → Actions**:
+- вкладка **Secrets** → **New repository secret**:
+  - `TELEGRAM_BOT_TOKEN` — токен бота;
+  - `ANTHROPIC_API_KEY` — ключ Claude (необязательно, без него новости без шуток).
+
+### 3. ID чата
+1. Напишите в чате `/chatid` (бот не ответит, это нормально).
+2. **Actions → Утренняя сводка → Run workflow**, режим `find-chat` → Run.
+3. Откройте запуск → шаг «Запуск бота»: там строка `CHAT_ID=-100…`.
+4. **Settings → Secrets and variables → Actions → вкладка Variables → New repository variable**:
+   имя `CHAT_ID`, значение — число из лога.
+
+### 4. Проверка
+**Actions → Утренняя сводка → Run workflow**, режим `send` → сводка придёт в чат сразу.
+Дальше бот будет писать сам каждый день в 9:00 МСК.
+
+### Особенности режима GitHub Actions
+- Команды `/today`, `/chatid`, `/members` не отвечают: бот не работает постоянно.
+- Участников бот узнаёт из сообщений за последние 24 часа перед запуском
+  (столько Telegram хранит их для бота) и сохраняет в `data/members.json` в репозитории.
+- GitHub отключает расписание, если в публичном репозитории 60 дней не было коммитов.
+  Тогда придёт письмо; включить снова: **Actions → Утренняя сводка → Enable workflow**.
+- Репозиторий публичный: `members.txt` и `data/members.json` видны всем. Токены в секретах не видны.
+
+## Запуск на своём сервере (VPS)
+
+Бот работает постоянно, время точное, команды отвечают.
+Если используете этот способ, отключите расписание в GitHub Actions, иначе сводка придёт дважды.
+
 ```bash
 sudo useradd -r -m -d /opt/chatbot chatbot
 sudo -u chatbot git clone <URL репозитория> /opt/chatbot
@@ -44,30 +77,19 @@ cd /opt/chatbot
 sudo -u chatbot python3 -m venv .venv
 sudo -u chatbot .venv/bin/pip install -r requirements.txt
 sudo -u chatbot cp .env.example .env
-sudo -u chatbot nano .env          # TELEGRAM_BOT_TOKEN и ANTHROPIC_API_KEY
-```
-
-### 3. Узнать ID чата
-```bash
-sudo -u chatbot .venv/bin/python -m chatbot.main
-```
-Добавьте бота в чат, напишите `/chatid`, впишите ID в `.env` (`CHAT_ID=-100…`) и остановите бота (Ctrl+C).
-
-### 4. Запустить как сервис
-```bash
+sudo -u chatbot nano .env          # TELEGRAM_BOT_TOKEN и ANTHROPIC_API_KEY, строку CHAT_ID удалить
+sudo -u chatbot .venv/bin/python -m chatbot.main   # в чате /chatid → вписать CHAT_ID в .env, Ctrl+C
 sudo cp deploy/chatbot.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now chatbot
-journalctl -u chatbot -f           # логи
+sudo systemctl daemon-reload && sudo systemctl enable --now chatbot
 ```
 
-## Команды
+## Команды (только на VPS)
 - `/today` — прислать сводку прямо сейчас (для проверки)
 - `/chatid` — показать ID чата
 - `/members` — сколько человек в списке упоминаний
 
 ## Как это работает
-- В 8:57 МСК бот заранее собирает новости и погоду, в 9:00:00 отправляет готовое сообщение. Если заготовки нет, собирает её на месте.
+- На VPS: в 8:57 МСК бот заранее собирает новости и погоду, в 9:00:00 отправляет готовое сообщение. Если заготовки нет, собирает её на месте.
 - Новости: [RSS РБК](https://rssexport.rbc.ru/rbcnews/news/30/full.rss) → Claude (`claude-opus-5-5`, можно поменять в `ANTHROPIC_MODEL`) выбирает 5 самых значимых мировых новостей и пересказывает их с юмором. Если Claude недоступен или отказал, бот присылает обычные заголовки.
 - Погода: [Open-Meteo](https://open-meteo.com), без ключа.
 - Если сообщение длиннее лимита Telegram (4096 символов), упоминания уходят отдельным сообщением.

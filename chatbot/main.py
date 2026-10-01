@@ -7,7 +7,7 @@ from datetime import datetime, time
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from telegram import LinkPreviewOptions, Update
+from telegram import Bot, LinkPreviewOptions, Update
 from telegram.constants import ParseMode
 from telegram.error import NetworkError, RetryAfter
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parent.parent
 log = logging.getLogger("chatbot")
 
 
-def _load_env(path: Path) -> None:
+def load_env(path: Path) -> None:
     if not path.exists():
         return
     for line in path.read_text(encoding="utf-8").splitlines():
@@ -36,11 +36,11 @@ def _load_env(path: Path) -> None:
         os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
 
-async def _send(context: ContextTypes.DEFAULT_TYPE, chat_id: int, texts: list[str]) -> None:
+async def send_texts(bot: Bot, chat_id: int, texts: list[str]) -> None:
     for text in texts:
         for attempt in range(3):
             try:
-                await context.bot.send_message(
+                await bot.send_message(
                     chat_id,
                     text,
                     parse_mode=ParseMode.HTML,
@@ -79,7 +79,7 @@ async def send_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     if chat_id is None:
         log.warning("CHAT_ID не задан — некуда отправлять")
         return
-    await _send(context, chat_id, texts)
+    await send_texts(context.bot, chat_id, texts)
     log.info("Утреннее сообщение отправлено")
 
 
@@ -89,7 +89,7 @@ async def cmd_chatid(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
 async def cmd_today(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.effective_message.reply_text("Собираю сводку…")
-    await _send(context, update.effective_chat.id, await _build_today(context))
+    await send_texts(context.bot, update.effective_chat.id, await _build_today(context))
 
 
 async def cmd_members(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -104,16 +104,7 @@ async def track(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     msg = update.effective_message
     if msg is None or update.effective_chat.id != context.bot_data["chat_id"]:
         return
-    store: MemberStore = context.bot_data["store"]
-    if msg.left_chat_member:
-        store.forget(msg.left_chat_member.id)
-        return
-    users = list(msg.new_chat_members or [])
-    if msg.from_user:
-        users.append(msg.from_user)
-    for user in users:
-        if not user.is_bot:
-            store.remember(user.id, user.username, user.first_name)
+    context.bot_data["store"].record(msg)
 
 
 def main() -> None:
@@ -121,7 +112,7 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s", level=logging.INFO
     )
     logging.getLogger("httpx").setLevel(logging.WARNING)
-    _load_env(ROOT / ".env")
+    load_env(ROOT / ".env")
 
     token = os.environ["TELEGRAM_BOT_TOKEN"]
     chat_id = int(os.environ["CHAT_ID"]) if os.getenv("CHAT_ID") else None

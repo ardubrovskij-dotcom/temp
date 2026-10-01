@@ -59,6 +59,18 @@ class MemberStore:
             if self._seen.pop(str(user_id), None) is not None:
                 self._save()
 
+    def record(self, msg) -> None:
+        """Учитывает сообщение из чата: автора и вступивших запоминает, ушедших забывает."""
+        if msg.left_chat_member:
+            self.forget(msg.left_chat_member.id)
+            return
+        users = list(msg.new_chat_members or [])
+        if msg.from_user:
+            users.append(msg.from_user)
+        for user in users:
+            if not user.is_bot:
+                self.remember(user.id, user.username, user.first_name)
+
     def mentions(self) -> list[str]:
         """HTML-упоминания без дублей (юзернеймы сравниваются без учёта регистра)."""
         result = [f"@{u}" for u in self.static]
