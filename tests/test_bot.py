@@ -40,7 +40,9 @@ def test_parse_rss():
 def test_format_jokes_skips_bad_indexes_and_escapes():
     items = news.parse_rss(RSS)
     picks = [{"index": 9, "joke": "нет"}, {"index": 1, "joke": "a < b"}, {"index": 0, "joke": ""}]
-    assert news.format_jokes(items, picks) == '1. a &lt; b <a href="https://www.rbc.ru/b">(РБК)</a>'
+    assert news.format_jokes(items, picks) == (
+        '1. <a href="https://www.rbc.ru/b">Второй</a>\n😏 <i>a &lt; b</i>'
+    )
 
 
 def test_comedy_uses_claude_output(monkeypatch):
@@ -63,7 +65,7 @@ def test_comedy_uses_claude_output(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
     monkeypatch.setattr(news.anthropic, "AsyncAnthropic", FakeClient)
     result = asyncio.run(news._comedy(items))
-    assert result == '1. Шутка <a href="https://www.rbc.ru/a">(РБК)</a>'
+    assert result == '1. <a href="https://www.rbc.ru/a">Заголовок &amp; один</a>\n😏 <i>Шутка</i>'
     assert captured["model"] == "claude-opus-5-5"
     assert "[1] (Экономика) Второй" in captured["messages"][0]["content"]
 
