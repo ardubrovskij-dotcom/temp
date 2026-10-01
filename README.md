@@ -44,7 +44,10 @@ Telegram не даёт ботам получить список всех уча�
 Репозиторий → **Settings → Secrets and variables → Actions**:
 - вкладка **Secrets** → **New repository secret**:
   - `TELEGRAM_BOT_TOKEN` — токен бота;
-  - `ANTHROPIC_API_KEY` — ключ Claude (необязательно, без него новости без шуток).
+  - для шуток в новостях один из двух (без них новости без шуток):
+    - `CLAUDE_CODE_OAUTH_TOKEN` — токен подписки Claude: на любом компьютере с Claude Code
+      выполнить `claude setup-token` и вставить выданный токен;
+    - `ANTHROPIC_API_KEY` — ключ API с [platform.claude.com](https://platform.claude.com).
 
 ### 3. ID чата
 1. Напишите в чате `/chatid` (бот не ответит, это нормально).

@@ -126,3 +126,16 @@ def test_compose_splits_long_mentions():
 def test_compose_single_message():
     msgs = message.compose(date(2026, 9, 30), "н", "п", ["@a", "@b"])
     assert len(msgs) == 1 and msgs[0].endswith("@a @b")
+
+
+def test_comedy_cli_parses_structured_output(monkeypatch, tmp_path):
+    items = news.parse_rss(RSS)
+    fake = tmp_path / "claude"
+    out = json.dumps({"is_error": False, "result": "", "structured_output": {"items": [{"index": 1, "joke": "Ха"}]}})
+    fake.write_text(f"#!/bin/sh\necho '{out}'\n", encoding="utf-8")
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", str(tmp_path))
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "test")
+    result = asyncio.run(news._comedy(items))
+    assert result == '1. <a href="https://www.rbc.ru/b">Второй</a>\n😏 <i>Ха</i>'

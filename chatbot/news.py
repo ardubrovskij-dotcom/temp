@@ -1,10 +1,12 @@
 """Свежие новости РБК, пересказанные Claude в стиле вечернего шоу."""
 
+import asyncio
 import html
 import json
 import logging
 import os
 import re
+import shutil
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 
@@ -130,9 +132,62 @@ def format_jokes(items: list[NewsItem], picks: list[dict]) -> str:
 
 
 async def _comedy(items: list[NewsItem]) -> str | None:
-    if not os.getenv("ANTHROPIC_API_KEY"):
-        log.info("ANTHROPIC_API_KEY не задан — новости без шуток")
+    """Шутки через API-ключ, иначе через Claude Code по подписке, иначе None."""
+    if os.getenv("ANTHROPIC_API_KEY"):
+        return await _comedy_api(items)
+    if os.getenv("CLAUDE_CODE_OAUTH_TOKEN"):
+        return await _comedy_cli(items)
+    log.info("Нет ни ANTHROPIC_API_KEY, ни CLAUDE_CODE_OAUTH_TOKEN — новости без шуток")
+    return None
+
+
+async def _comedy_cli(items: list[NewsItem]) -> str | None:
+    claude = shutil.which("claude")
+    if claude is None:
+        log.warning("Claude Code CLI не установлен — новости без шуток")
         return None
+    cmd = [
+        claude,
+        "-p",
+        USER_PROMPT.format(count=NEWS_COUNT, feed=_feed_text(items)),
+        "--system-prompt",
+        SYSTEM_PROMPT,
+        "--json-schema",
+        json.dumps(OUTPUT_SCHEMA),
+        "--output-format",
+        "json",
+        "--tools",
+        "",
+        "--effort",
+        "low",
+        "--no-session-persistence",
+    ]
+    if os.getenv("CLAUDE_MODEL"):
+        cmd += ["--model", os.environ["CLAUDE_MODEL"]]
+    proc = await asyncio.create_subprocess_exec(
+        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
+    except asyncio.TimeoutError:
+        proc.kill()
+        log.error("Claude Code не ответил за 5 минут")
+        return None
+    try:
+        result = json.loads(stdout)
+    except ValueError:
+        log.error("Claude Code: код %s, вывод %r, ошибки %r", proc.returncode, stdout[:500], stderr[:500])
+        return None
+    if result.get("is_error") or not isinstance(result.get("structured_output"), dict):
+        log.error("Claude Code вернул ошибку: %r", str(result.get("result"))[:500])
+        return None
+    picks = result["structured_output"].get("items")
+    if not isinstance(picks, list):
+        return None
+    return format_jokes(items, picks) or None
+
+
+async def _comedy_api(items: list[NewsItem]) -> str | None:
     client = anthropic.AsyncAnthropic(timeout=120)
     try:
         response = await client.beta.messages.create(
