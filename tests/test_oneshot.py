@@ -14,10 +14,13 @@ def no_meme(monkeypatch):
     monkeypatch.setattr(oneshot.meme, "get_meme", fake_meme)
 
 
-def _msg(chat_id, user_id, username, is_bot=False):
+def _msg(chat_id, user_id, username, is_bot=False, text="привет", message_id=1):
     user = SimpleNamespace(id=user_id, username=username, first_name=username, is_bot=is_bot)
     chat = SimpleNamespace(id=chat_id, title="Чат", full_name=None, type="supergroup")
-    return SimpleNamespace(chat=chat, from_user=user, new_chat_members=(), left_chat_member=None)
+    return SimpleNamespace(
+        chat=chat, from_user=user, new_chat_members=(), left_chat_member=None,
+        text=text, message_id=message_id,
+    )
 
 
 class FakeBot:
@@ -25,6 +28,13 @@ class FakeBot:
         self.queue = [SimpleNamespace(update_id=i, message=m) for i, m in enumerate(messages, 100)]
         self.offsets = []
         self.sent = []
+        self.commands = None
+
+    async def get_me(self):
+        return SimpleNamespace(username="bashenka_dailynews_bot")
+
+    async def set_my_commands(self, commands):
+        self.commands = commands
 
     async def get_updates(self, offset=None, **kwargs):
         self.offsets.append(offset)
@@ -85,3 +95,32 @@ def test_send_attaches_meme(tmp_path, monkeypatch):
     bot = FakeBot([])
     asyncio.run(oneshot.send(bot, -1, wait=False))
     assert bot.sent == [(-1, "сводка"), (-1, "https://i.redd.it/x.jpg")]
+
+
+def test_parse_command():
+    bot = "bashenka_dailynews_bot"
+    assert oneshot.parse_command("/news", bot) == "news"
+    assert oneshot.parse_command("/MEME@Bashenka_DailyNews_Bot", bot) == "meme"
+    assert oneshot.parse_command("/news@other_bot", bot) is None
+    assert oneshot.parse_command("/start", bot) is None
+    assert oneshot.parse_command("news", bot) is None
+    assert oneshot.parse_command(None, bot) is None
+
+
+def test_poll_answers_each_command_once(tmp_path, monkeypatch):
+    monkeypatch.setattr(oneshot, "ROOT", tmp_path)
+    answered = []
+
+    async def fake_answer(bot, chat_id, command, reply_to):
+        answered.append((chat_id, command, reply_to))
+
+    monkeypatch.setattr(oneshot, "answer_command", fake_answer)
+    bot = FakeBot([
+        _msg(-1, 1, "a", text="/news", message_id=10),
+        _msg(-1, 2, "b", text="/news", message_id=11),
+        _msg(-1, 3, "c", text="/meme@bashenka_dailynews_bot", message_id=12),
+        _msg(-2, 4, "x", text="/meme", message_id=13),
+    ])
+    asyncio.run(oneshot.poll(bot, -1))
+    assert answered == [(-1, "news", 11), (-1, "meme", 12)]
+    assert [c.command for c in bot.commands] == ["news", "meme"]

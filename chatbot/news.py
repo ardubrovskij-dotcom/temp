@@ -5,6 +5,7 @@ import html
 import json
 import logging
 import os
+import random
 import re
 import shutil
 import xml.etree.ElementTree as ET
@@ -16,7 +17,7 @@ import httpx
 log = logging.getLogger(__name__)
 
 RSS_URL = "https://rssexport.rbc.ru/rbcnews/news/30/full.rss"
-NEWS_COUNT = 5
+NEWS_COUNT = 3
 DEFAULT_MODEL = "claude-opus-5-5"
 
 SYSTEM_PROMPT = """\
@@ -29,12 +30,17 @@ SYSTEM_PROMPT = """\
 полу, религии. Шути над ситуацией, не выдумывая фактов, которых нет в заголовке и анонсе.
 
 Заголовок читатель увидит отдельно, поэтому не пересказывай его — сразу шути. \
-Каждый комментарий — 1–2 коротких предложения на русском языке, без эмодзи."""
+Каждый комментарий — 1–2 коротких предложения на русском языке, без эмодзи.
+
+Ещё ты пишешь для чата пожелание на день: милое, но токсичное — как от лучшей подруги-язвы, \
+которая любит, но не упустит шанса подколоть. Обращайся ко всему чату на «вы», \
+не указывая пол. 1–2 предложения, без мата."""
 
 USER_PROMPT = """\
 Ниже свежая лента РБК. Выбери {count} самых значимых новостей, \
 отдавая приоритет мировым и международным событиям (политика, экономика, наука, технологии), \
-а не региональным происшествиям. Для каждой укажи номер из ленты и напиши смешной комментарий.
+а не региональным происшествиям. Для каждой укажи номер из ленты и напиши смешной комментарий. \
+В поле wish напиши пожелание на день.
 
 {feed}"""
 
@@ -52,11 +58,23 @@ OUTPUT_SCHEMA = {
                 "required": ["index", "joke"],
                 "additionalProperties": False,
             },
-        }
+        },
+        "wish": {"type": "string"},
     },
-    "required": ["items"],
+    "required": ["items", "wish"],
     "additionalProperties": False,
 }
+
+
+FALLBACK_WISHES = [
+    "Желаю вам сегодня продуктивности — хотя бы на уровне кофемашины, она хоть что-то делает.",
+    "Пусть сегодня всё получится. А если нет — ну, вы хотя бы красивые.",
+    "Хорошего дня! Постарайтесь сегодня никого не разочаровать. Особенно себя — вы и так стараетесь.",
+    "Пусть день будет лёгким, как ваши обещания начать с понедельника.",
+    "Желаю сегодня быть на высоте. Можно начать с того, чтобы встать с кровати.",
+    "Сияйте сегодня! Ну или хотя бы не тускнейте сильнее, чем вчера.",
+    "Пусть сегодня вас окружают умные люди. Для разнообразия.",
+]
 
 
 @dataclass
@@ -131,7 +149,7 @@ def format_jokes(items: list[NewsItem], picks: list[dict]) -> str:
     return "\n\n".join(lines)
 
 
-async def _comedy(items: list[NewsItem]) -> str | None:
+async def _comedy(items: list[NewsItem]) -> dict | None:
     """Шутки через API-ключ, иначе через Claude Code по подписке, иначе None."""
     if os.getenv("ANTHROPIC_API_KEY"):
         return await _comedy_api(items)
@@ -141,7 +159,7 @@ async def _comedy(items: list[NewsItem]) -> str | None:
     return None
 
 
-async def _comedy_cli(items: list[NewsItem]) -> str | None:
+async def _comedy_cli(items: list[NewsItem]) -> dict | None:
     claude = shutil.which("claude")
     if claude is None:
         log.warning("Claude Code CLI не установлен — новости без шуток")
@@ -166,7 +184,8 @@ async def _comedy_cli(items: list[NewsItem]) -> str | None:
         cmd += ["--model", os.environ["CLAUDE_MODEL"]]
     env = dict(os.environ)
     # При копировании из терминала токен часто переносится на новую строку.
-    env["CLAUDE_CODE_OAUTH_TOKEN"] = "".join(env["CLAUDE_CODE_OAUTH_TOKEN"].split())
+    if "CLAUDE_CODE_OAUTH_TOKEN" in env:
+        env["CLAUDE_CODE_OAUTH_TOKEN"] = "".join(env["CLAUDE_CODE_OAUTH_TOKEN"].split())
     proc = await asyncio.create_subprocess_exec(
         *cmd, env=env, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
     )
@@ -184,13 +203,10 @@ async def _comedy_cli(items: list[NewsItem]) -> str | None:
     if result.get("is_error") or not isinstance(result.get("structured_output"), dict):
         log.error("Claude Code вернул ошибку: %r", str(result.get("result"))[:500])
         return None
-    picks = result["structured_output"].get("items")
-    if not isinstance(picks, list):
-        return None
-    return format_jokes(items, picks) or None
+    return result["structured_output"]
 
 
-async def _comedy_api(items: list[NewsItem]) -> str | None:
+async def _comedy_api(items: list[NewsItem]) -> dict | None:
     client = anthropic.AsyncAnthropic(timeout=120)
     try:
         response = await client.beta.messages.create(
@@ -225,19 +241,29 @@ async def _comedy_api(items: list[NewsItem]) -> str | None:
         return None
     text = "".join(b.text for b in response.content if b.type == "text")
     try:
-        picks = json.loads(text)["items"]
-    except (ValueError, KeyError, TypeError):
+        return json.loads(text)
+    except ValueError:
         log.exception("Не удалось разобрать ответ Claude: %r", text[:500])
         return None
-    return format_jokes(items, picks) or None
 
 
-async def get_news() -> str:
+def _wish(data: dict | None) -> str:
+    wish = data.get("wish") if isinstance(data, dict) else None
+    if isinstance(wish, str) and wish.strip():
+        return html.escape(wish.strip())
+    return html.escape(random.choice(FALLBACK_WISHES))
+
+
+async def get_digest() -> tuple[str, str]:
+    """Новости (HTML) и пожелание на день (HTML)."""
     try:
         items = await fetch_rbc()
     except Exception:
         log.exception("Лента РБК недоступна")
-        return "Лента РБК сегодня не отвечает — видимо, новости ещё спят."
+        return "Лента РБК сегодня не отвечает — видимо, новости ещё спят.", _wish(None)
     if not items:
-        return "В ленте РБК пусто — редкий день, когда в мире ничего не случилось."
-    return await _comedy(items) or format_plain(items)
+        return "В ленте РБК пусто — редкий день, когда в мире ничего не случилось.", _wish(None)
+    data = await _comedy(items)
+    picks = data.get("items") if isinstance(data, dict) else None
+    text = format_jokes(items, picks) if isinstance(picks, list) else ""
+    return text or format_plain(items), _wish(data)

@@ -1,4 +1,5 @@
 import asyncio
+import html
 import json
 from datetime import date, timedelta
 from types import SimpleNamespace
@@ -47,7 +48,7 @@ def test_format_jokes_skips_bad_indexes_and_escapes():
 
 def test_comedy_uses_claude_output(monkeypatch):
     items = news.parse_rss(RSS)
-    payload = {"items": [{"index": 0, "joke": "Шутка"}]}
+    payload = {"items": [{"index": 0, "joke": "Шутка"}], "wish": "Будьте <лучше>"}
     captured = {}
 
     class FakeMessages:
@@ -64,8 +65,14 @@ def test_comedy_uses_claude_output(monkeypatch):
 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
     monkeypatch.setattr(news.anthropic, "AsyncAnthropic", FakeClient)
-    result = asyncio.run(news._comedy(items))
-    assert result == '1. <a href="https://www.rbc.ru/a">Заголовок &amp; один</a>\n😏 <i>Шутка</i>'
+
+    async def fake_fetch():
+        return items
+
+    monkeypatch.setattr(news, "fetch_rbc", fake_fetch)
+    text, wish = asyncio.run(news.get_digest())
+    assert text == '1. <a href="https://www.rbc.ru/a">Заголовок &amp; один</a>\n😏 <i>Шутка</i>'
+    assert wish == "Будьте &lt;лучше&gt;"
     assert captured["model"] == "claude-opus-5-5"
     assert "[1] (Экономика) Второй" in captured["messages"][0]["content"]
 
@@ -117,28 +124,36 @@ def test_members_dedupe_and_forget(tmp_path):
 
 def test_compose_splits_long_mentions():
     mentions = [f"@user_{i:04d}" for i in range(600)]
-    msgs = message.compose(date(2026, 9, 30), "новости", "погода", mentions)
+    msgs = message.compose(date(2026, 9, 30), "новости", "пожелание", "погода", mentions)
     assert msgs[0].startswith("<b>Сегодня среда — поздравляю всех с Квадрой!</b>")
     assert all(len(m) <= message.TG_LIMIT for m in msgs)
     assert " ".join(msgs[1:]).split() == mentions
 
 
 def test_compose_single_message():
-    msgs = message.compose(date(2026, 9, 30), "н", "п", ["@a", "@b"])
-    assert len(msgs) == 1 and msgs[0].endswith("@a @b")
+    msgs = message.compose(date(2026, 9, 30), "н", "ж", "п", ["@a", "@b"])
+    assert len(msgs) == 1
+    assert msgs[0].split(message.SEPARATOR) == [
+        "<b>Сегодня среда — поздравляю всех с Квадрой!</b>",
+        "📰 <b>Новости мира</b>\n\nн",
+        "💌 <b>Пожелание на день</b>\nж",
+        "🌦 <b>Погода на сегодня</b>\nп",
+        "@a @b",
+    ]
 
 
 def test_comedy_cli_parses_structured_output(monkeypatch, tmp_path):
     items = news.parse_rss(RSS)
     fake = tmp_path / "claude"
-    out = json.dumps({"is_error": False, "result": "", "structured_output": {"items": [{"index": 1, "joke": "Ха"}]}})
+    out = json.dumps({"is_error": False, "result": "", "structured_output": {"items": [{"index": 1, "joke": "Ха"}], "wish": "w"}})
     fake.write_text(f"#!/bin/sh\necho '{out}'\n", encoding="utf-8")
     fake.chmod(0o755)
     monkeypatch.setenv("PATH", str(tmp_path))
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "test")
     result = asyncio.run(news._comedy(items))
-    assert result == '1. <a href="https://www.rbc.ru/b">Второй</a>\n😏 <i>Ха</i>'
+    assert news.format_jokes(items, result["items"]) == '1. <a href="https://www.rbc.ru/b">Второй</a>\n😏 <i>Ха</i>'
+    assert result["wish"] == "w"
 
 
 def test_pick_meme_skips_video_allows_nsfw():
@@ -152,3 +167,17 @@ def test_pick_meme_skips_video_allows_nsfw():
     assert meme.pick_meme(memes)["url"] == "https://i.redd.it/a.jpg"
     assert meme.pick_meme(memes[1:])["url"] == "https://i.redd.it/d.png"
     assert meme.pick_meme([]) is None
+
+
+def test_digest_without_claude_uses_plain_news_and_fallback_wish(monkeypatch):
+    items = news.parse_rss(RSS)
+
+    async def fake_fetch():
+        return items
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN", raising=False)
+    monkeypatch.setattr(news, "fetch_rbc", fake_fetch)
+    text, wish = asyncio.run(news.get_digest())
+    assert text.startswith('1. <a href="https://www.rbc.ru/a">')
+    assert wish in {html.escape(w) for w in news.FALLBACK_WISHES}

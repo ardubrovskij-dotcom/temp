@@ -7,12 +7,12 @@ from datetime import datetime, time
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from telegram import Bot, LinkPreviewOptions, Update
+from telegram import Bot, BotCommand, LinkPreviewOptions, ReplyParameters, Update
 from telegram.constants import ParseMode
 from telegram.error import NetworkError, RetryAfter
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
-from . import meme, message
+from . import meme, message, news
 from .members import MemberStore
 
 MSK = ZoneInfo("Europe/Moscow")
@@ -21,6 +21,11 @@ SEND_AT = time(9, 0, tzinfo=MSK)
 PREPARE_AT = time(8, 57, tzinfo=MSK)
 
 ROOT = Path(__file__).resolve().parent.parent
+
+BOT_COMMANDS = [
+    BotCommand("news", "Свежие новости с шутками"),
+    BotCommand("meme", "Случайный мем"),
+]
 
 log = logging.getLogger("chatbot")
 
@@ -56,19 +61,54 @@ async def send_texts(bot: Bot, chat_id: int, texts: list[str]) -> None:
                 await asyncio.sleep(5)
 
 
-async def send_meme(bot: Bot, chat_id: int, item: dict | None) -> None:
+async def send_meme(
+    bot: Bot,
+    chat_id: int,
+    item: dict | None,
+    caption: str = "🖼 Мем дня",
+    reply_to: int | None = None,
+) -> bool:
     if not item:
-        return
+        return False
+    nsfw = bool(item.get("nsfw") or item.get("spoiler"))
     try:
-        nsfw = bool(item.get("nsfw") or item.get("spoiler"))
         await bot.send_photo(
             chat_id,
             item["url"],
-            caption="🖼 Мем дня" + (" (18+)" if nsfw else ""),
+            caption=caption + (" (18+)" if nsfw else ""),
             has_spoiler=nsfw,
+            reply_parameters=_reply(reply_to),
         )
+        return True
     except Exception:
         log.exception("Не удалось отправить мем %s", item.get("url"))
+        return False
+
+
+def _reply(message_id: int | None) -> ReplyParameters | None:
+    if message_id is None:
+        return None
+    return ReplyParameters(message_id=message_id, allow_sending_without_reply=True)
+
+
+async def answer_command(bot: Bot, chat_id: int, command: str, reply_to: int | None) -> None:
+    """Ответ на /news и /meme."""
+    if command == "news":
+        news_text, _ = await news.get_digest()
+        await bot.send_message(
+            chat_id,
+            f"📰 <b>Новости мира</b>\n\n{news_text}",
+            parse_mode=ParseMode.HTML,
+            link_preview_options=LinkPreviewOptions(is_disabled=True),
+            reply_parameters=_reply(reply_to),
+        )
+    elif command == "meme":
+        item = await meme.get_meme(random_pick=True)
+        if not await send_meme(bot, chat_id, item, caption="🖼 Мем", reply_to=reply_to):
+            await bot.send_message(
+                chat_id, "Мемы закончились. Попробуйте посмеяться над собой.",
+                reply_parameters=_reply(reply_to),
+            )
 
 
 async def _build_today(context: ContextTypes.DEFAULT_TYPE) -> list[str]:
@@ -109,6 +149,16 @@ async def cmd_today(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await send_meme(context.bot, update.effective_chat.id, await meme.get_meme())
 
 
+async def cmd_news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    msg = update.effective_message
+    await answer_command(context.bot, msg.chat_id, "news", msg.message_id)
+
+
+async def cmd_meme(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    msg = update.effective_message
+    await answer_command(context.bot, msg.chat_id, "meme", msg.message_id)
+
+
 async def cmd_members(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     store: MemberStore = context.bot_data["store"]
     await update.effective_message.reply_text(
@@ -134,13 +184,18 @@ def main() -> None:
     token = os.environ["TELEGRAM_BOT_TOKEN"]
     chat_id = int(os.environ["CHAT_ID"]) if os.getenv("CHAT_ID") else None
 
-    app = Application.builder().token(token).build()
+    async def post_init(application: Application) -> None:
+        await application.bot.set_my_commands(BOT_COMMANDS)
+
+    app = Application.builder().token(token).post_init(post_init).build()
     app.bot_data["chat_id"] = chat_id
     app.bot_data["store"] = MemberStore(ROOT / "members.txt", ROOT / "data" / "members.json")
 
     app.add_handler(CommandHandler("chatid", cmd_chatid))
     app.add_handler(CommandHandler("today", cmd_today))
     app.add_handler(CommandHandler("members", cmd_members))
+    app.add_handler(CommandHandler("news", cmd_news))
+    app.add_handler(CommandHandler("meme", cmd_meme))
     app.add_handler(MessageHandler(filters.ChatType.GROUPS, track), group=1)
 
     if chat_id is None:

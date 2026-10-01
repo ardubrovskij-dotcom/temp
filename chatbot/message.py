@@ -7,21 +7,24 @@ from datetime import date
 from . import days, news, weather
 
 TG_LIMIT = 4096
+SEPARATOR = "\n--------------\n"
 
 
-def compose(day: date, news_text: str, weather_text: str, mentions: list[str]) -> list[str]:
+def compose(
+    day: date, news_text: str, wish: str, weather_text: str, mentions: list[str]
+) -> list[str]:
     """Возвращает список сообщений: сводку и (если не влезают) упоминания отдельно."""
-    main = "\n\n".join(
-        [
-            f"<b>{html.escape(days.greeting(day))}</b>",
-            f"📰 <b>Новости мира</b>\n{news_text}",
-            f"🌦 <b>Погода на сегодня</b>\n{weather_text}",
-        ]
-    )
+    sections = [
+        f"<b>{html.escape(days.greeting(day))}</b>",
+        f"📰 <b>Новости мира</b>\n\n{news_text}",
+        f"💌 <b>Пожелание на день</b>\n{wish}",
+        f"🌦 <b>Погода на сегодня</b>\n{weather_text}",
+    ]
+    main = SEPARATOR.join(sections)
     if not mentions:
         return [main]
     tags = " ".join(mentions)
-    combined = f"{main}\n\n{tags}"
+    combined = f"{main}{SEPARATOR}{tags}"
     if len(combined) <= TG_LIMIT:
         return [combined]
     messages = [main]
@@ -37,5 +40,7 @@ def compose(day: date, news_text: str, weather_text: str, mentions: list[str]) -
 
 
 async def build(day: date, mentions: list[str]) -> list[str]:
-    news_text, weather_text = await asyncio.gather(news.get_news(), weather.get_weather())
-    return compose(day, news_text, weather_text, mentions)
+    (news_text, wish), weather_text = await asyncio.gather(
+        news.get_digest(), weather.get_weather()
+    )
+    return compose(day, news_text, wish, weather_text, mentions)

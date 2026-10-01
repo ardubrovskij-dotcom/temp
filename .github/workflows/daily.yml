@@ -5,19 +5,22 @@ on:
     # 05:10 UTC = 08:10 МСК. GitHub запускает расписание с задержкой,
     # поэтому стартуем заранее, а скрипт сам ждёт ровно 9:00 МСК.
     - cron: "10 5 * * *"
+    # Ответы на команды /news и /meme (GitHub может задерживать запуски).
+    - cron: "*/5 * * * *"
   workflow_dispatch:
     inputs:
       mode:
-        description: "send — сводка сейчас; test — сводка без тэгов; find-chat — узнать ID чата"
+        description: "send — сводка сейчас; test — сводка без тэгов; poll — ответить на команды; find-chat — узнать ID чата"
         type: choice
-        options: [send, test, find-chat]
+        options: [send, test, poll, find-chat]
         default: send
 
 permissions:
   contents: write
 
 concurrency:
-  group: daily-digest
+  # Утренняя сводка и опрос команд работают независимо друг от друга.
+  group: bot-${{ github.event.schedule == '*/5 * * * *' && 'poll' || inputs.mode || 'daily' }}
   cancel-in-progress: false
 
 jobs:
@@ -44,7 +47,7 @@ jobs:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # «Богатая башенка». Переменная CHAT_ID в настройках репозитория имеет приоритет.
           CHAT_ID: ${{ vars.CHAT_ID || '-1002964274108' }}
-          MODE: ${{ github.event_name == 'schedule' && 'send --wait' || inputs.mode == 'test' && 'send --no-mentions' || inputs.mode }}
+          MODE: ${{ github.event.schedule == '*/5 * * * *' && 'poll' || github.event_name == 'schedule' && 'send --wait' || inputs.mode == 'test' && 'send --no-mentions' || inputs.mode }}
         run: python -m chatbot.oneshot $MODE
 
       - name: Сохранить список участников
@@ -55,4 +58,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "Обновить список участников"
-          git push
+          for i in 1 2 3; do
+            git pull --rebase -q && git push && exit 0
+            git rebase --abort 2>/dev/null || true
+            sleep 5
+          done
+          echo "Не удалось сохранить список участников, попробую в следующий раз"
