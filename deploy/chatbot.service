@@ -1,0 +1,15 @@
+[Unit]
+Description=Telegram chat bot (утренняя сводка)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=chatbot
+WorkingDirectory=/opt/chatbot
+ExecStart=/opt/chatbot/.venv/bin/python -m chatbot.main
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,13 @@
+# Участники, которых бот тэгает всегда (по одному @username в строке).
+# Остальных бот добавляет сам, когда они пишут в чат.
+@osaka_911
+@sergeqofficial
+@seiunmori
+@zelez0beton
+@dimadesig
+@imritich
+@y_desi
+@made_by_vlada
+@alliska11
+@butinum
+@KarolinaPershina
